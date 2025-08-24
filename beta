@@ -1,0 +1,575 @@
+local player = game.Players.LocalPlayer
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local workspace = game:GetService("Workspace")
+
+-- === Переменные ===
+local autoPlantEnabled = false
+local pickupAuraEnabled = false
+local hatchAuraEnabled = false
+local autoBuySeedsEnabled = false
+local autoBuyEggsEnabled = false
+local autoBuyGearsEnabled = false
+local selectedSeeds = {}
+local selectedEggs = {}
+local selectedGears = {}
+
+local plantDelay = 0.1
+local pickupRange = 20
+local pickupWeight = 0.01
+local sellDelay = 10
+
+-- === RemoteEvents и данные ===
+local seedShop = require(replicatedStorage.Data.SeedData)
+local eggShop = require(replicatedStorage.Data.PetEggData)
+local gearShop = require(replicatedStorage.Data.GearData)
+
+local seeds = {}
+local eggs = {}
+local gears = {}
+
+for i, v in next, seedShop do
+    if v.StockChance > 0 then table.insert(seeds, i) end
+end
+
+for _, v in next, eggShop do
+    if v.StockChance > 0 then table.insert(eggs, v.EggName) end
+end
+
+for _, v in next, gearShop do
+    if v.StockChance > 0 then table.insert(gears, v.GearName) end
+end
+
+-- === Создание основного GUI (Twin | Grow a Garden) ===
+local mainGui = Instance.new("ScreenGui")
+mainGui.Name = "TwinGrowAGarden"
+mainGui.Parent = player.PlayerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 510) -- Увеличена высота для всех разделов
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.BackgroundTransparency = 0.3
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = mainGui
+
+-- Углы
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+-- Тень
+local shadow = Instance.new("ImageLabel")
+shadow.Name = "Shadow"
+shadow.Image = "rbxassetid://1316045217"
+shadow.ImageColor3 = Color3.new(0, 0, 0)
+shadow.ImageTransparency = 0.8
+shadow.ScaleType = Enum.ScaleType.Slice
+shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+shadow.Size = UDim2.new(1, 20, 1, 20)
+shadow.Position = UDim2.new(0, -10, 0, -10)
+shadow.BackgroundTransparency = 1
+shadow.Parent = mainFrame
+
+-- Заголовок
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 32)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundTransparency = 1
+titleBar.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Text = "Twin | Grow a Garden"
+title.Size = UDim2.new(1, -50, 1, 0)
+title.Position = UDim2.new(0, 12, 0, 0)
+title.BackgroundTransparency = 1
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansSemibold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+-- Разделитель
+local line = Instance.new("Frame")
+line.Size = UDim2.new(1, -24, 0, 1)
+line.Position = UDim2.new(0, 12, 0, 32)
+line.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+line.BackgroundTransparency = 0.7
+line.BorderSizePixel = 0
+line.Parent = mainFrame
+
+-- Перетаскивание заголовка
+local dragging = false
+local dragStartPos, frameStartPos
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStartPos = input.Position
+        frameStartPos = mainFrame.Position
+    end
+end)
+
+titleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStartPos
+        mainFrame.Position = UDim2.new(frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X,
+                                      frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- === Функции создания элементов ===
+
+-- ==== Заголовок раздела ====
+local function addSectionHeader(text, yPosition)
+    local header = Instance.new("TextLabel")
+    header.Text = text
+    header.Size = UDim2.new(1, -24, 0, 20)
+    header.Position = UDim2.new(0, 12, 0, yPosition)
+    header.BackgroundTransparency = 1
+    header.TextColor3 = Color3.fromRGB(255, 255, 255)
+    header.Font = Enum.Font.SourceSansBold
+    header.TextSize = 16
+    header.TextXAlignment = Enum.TextXAlignment.Left
+    header.Parent = mainFrame
+    return header
+end
+
+-- ==== Тумблер (Toggle) ====
+local function addToggle(name, default, callback, yPos)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -24, 0, 28)
+    frame.Position = UDim2.new(0, 12, 0, yPos)
+    frame.BackgroundTransparency = 1
+    frame.Parent = mainFrame
+
+    local label = Instance.new("TextLabel")
+    label.Text = name
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.SourceSans
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local toggle = Instance.new("TextButton")
+    toggle.Text = default and "ON" or "OFF"
+    toggle.Size = UDim2.new(0, 50, 0, 20)
+    toggle.Position = UDim2.new(1, -60, 0, 4)
+    toggle.BackgroundColor3 = default and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(60, 60, 60)
+    toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggle.Font = Enum.Font.SourceSansBold
+    toggle.TextSize = 14
+    toggle.Parent = frame
+
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 6)
+    buttonCorner.Parent = toggle
+
+    local enabled = default
+    toggle.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        toggle.Text = enabled and "ON" or "OFF"
+        toggle.BackgroundColor3 = enabled and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(60, 60, 60)
+        callback(enabled)
+    end)
+end
+
+-- ==== Ползунок (Slider) с закруглениями ====
+local function addSlider(name, min, max, default, callback, yPos)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -24, 0, 28)
+    frame.Position = UDim2.new(0, 12, 0, yPos)
+    frame.BackgroundTransparency = 1
+    frame.Parent = mainFrame
+
+    local label = Instance.new("TextLabel")
+    label.Text = name .. ": " .. tostring(default)
+    label.Size = UDim2.new(1, -60, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.SourceSans
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local input = Instance.new("TextBox")
+    input.Text = tostring(default)
+    input.Size = UDim2.new(0, 40, 0, 20)
+    input.Position = UDim2.new(1, -50, 0, 4)
+    input.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    input.BackgroundTransparency = 0.3
+    input.TextColor3 = Color3.fromRGB(255, 255, 255)
+    input.Font = Enum.Font.SourceSans
+    input.TextSize = 14
+    input.Parent = frame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = input
+
+    local value = default
+    input.FocusLost:Connect(function()
+        local num = tonumber(input.Text)
+        if num and num >= min and num <= max then
+            value = num
+            label.Text = name .. ": " .. tostring(value)
+            callback(value)
+        else
+            input.Text = tostring(value)
+        end
+    end)
+
+    return {
+        Value = function() return value end
+    }
+end
+
+-- ==== Кнопка ====
+local function addButton(name, callback, yPos)
+    local button = Instance.new("TextButton")
+    button.Text = name
+    button.Size = UDim2.new(1, -24, 0, 28)
+    button.Position = UDim2.new(0, 12, 0, yPos)
+    button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    button.BackgroundTransparency = 1
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Font = Enum.Font.SourceSansSemibold
+    button.TextSize = 14
+    button.Parent = mainFrame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+
+    -- Анимация при наведении
+    button.MouseEnter:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+        button.BackgroundTransparency = 1
+    end)
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        button.BackgroundTransparency = 1
+    end)
+
+    button.MouseButton1Click:Connect(callback)
+end
+
+-- ==== Выбор элементов в отдельном окне с перетаскиванием ====
+local function createSelectionGUI(titleText, items, selectedItems, callback)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = titleText .. "SelectionGUI"
+    gui.Parent = player.PlayerGui
+
+    local frame = Instance.new("Frame")
+    frame.Name = titleText .. "Frame"
+    frame.Size = UDim2.new(0, 280, 0, 700) -- Высота для семян
+    frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    frame.BackgroundTransparency = 0.3
+    frame.BorderSizePixel = 0
+    frame.Parent = gui
+
+    -- Углы
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = frame
+
+    -- Заголовок
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Text = "Select " .. titleText
+    titleLabel.Size = UDim2.new(1, -12, 0, 32)
+    titleLabel.Position = UDim2.new(0, 6, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.Font = Enum.Font.SourceSansSemibold
+    titleLabel.TextSize = 18
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = frame
+
+    -- Разделитель
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, -12, 0, 1)
+    divider.Position = UDim2.new(0, 6, 0, 32)
+    divider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    divider.BackgroundTransparency = 0.7
+    divider.BorderSizePixel = 0
+    divider.Parent = frame
+
+    -- Список предметов
+    local currentY = 40
+    for _, itemName in ipairs(items) do
+        local itemButton = Instance.new("TextButton")
+        itemButton.Text = "× " .. itemName
+        itemButton.Size = UDim2.new(1, -12, 0, 24)
+        itemButton.Position = UDim2.new(0, 6, 0, currentY)
+        itemButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        itemButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        itemButton.Font = Enum.Font.SourceSansSemibold
+        itemButton.TextSize = 14
+        itemButton.TextXAlignment = Enum.TextXAlignment.Left
+        itemButton.Parent = frame
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = itemButton
+
+        itemButton.MouseButton1Click:Connect(function()
+            if selectedItems[itemName] then
+                selectedItems[itemName] = nil
+                itemButton.Text = "× " .. itemName
+            else
+                selectedItems[itemName] = true
+                itemButton.Text = "✓ " .. itemName
+            end
+            callback(selectedItems)
+        end)
+
+        currentY = currentY + 26
+    end
+
+    -- Кнопка закрытия
+    local closeButton = Instance.new("TextButton")
+    closeButton.Text = "× Close"
+    closeButton.Size = UDim2.new(1, -12, 0, 28)
+    closeButton.Position = UDim2.new(0, 6, 0, 670)
+    closeButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    closeButton.BackgroundTransparency = 1
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.Font = Enum.Font.SourceSansSemibold
+    closeButton.TextSize = 16
+    closeButton.Parent = frame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = closeButton
+
+    closeButton.MouseEnter:Connect(function()
+        closeButton.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+        closeButton.BackgroundTransparency = 1
+    end)
+    closeButton.MouseLeave:Connect(function()
+        closeButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        closeButton.BackgroundTransparency = 1
+    end)
+
+    closeButton.MouseButton1Click:Connect(function()
+        gui.Enabled = false
+    end)
+
+    -- Перетаскивание GUI
+    local dragging = false
+    local dragStartPos, frameStartPos
+
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStartPos = input.Position
+            frameStartPos = frame.Position
+        end
+    end)
+
+    frame.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStartPos
+            frame.Position = UDim2.new(frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X,
+                                       frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    return gui
+end
+
+-- ==== Открытие GUI для выбора семян ====
+local seedGui = createSelectionGUI("Seeds", seeds, selectedSeeds, function() end)
+seedGui.Enabled = false
+
+local eggGui = createSelectionGUI("Eggs", eggs, selectedEggs, function() end)
+eggGui.Enabled = false
+
+local gearGui = createSelectionGUI("Gears", gears, selectedGears, function() end)
+gearGui.Enabled = false
+
+-- ==== Раздел Config ====
+addSectionHeader("Config", 40)
+addButton("Edit Seed List", function()
+    seedGui.Enabled = not seedGui.Enabled
+end, 65)
+
+addButton("Edit Egg List", function()
+    eggGui.Enabled = not eggGui.Enabled
+end, 95)
+
+addButton("Edit Gear List", function()
+    gearGui.Enabled = not gearGui.Enabled
+end, 125)
+
+addSlider("Plant Delay", 0.1, 10, plantDelay, function(val)
+    plantDelay = val
+end, 155)
+
+addSlider("Pickup Range", 5, 20, pickupRange, function(val)
+    pickupRange = val
+end, 185)
+
+addSlider("Min Pickup Weight", 0.01, 10, pickupWeight, function(val)
+    pickupWeight = val
+end, 215)
+
+-- ==== Раздел Main ====
+addSectionHeader("Main", 245)
+addToggle("Auto Plant", false, function(state)
+    autoPlantEnabled = state
+end, 270)
+
+addToggle("Pickup Aura", false, function(state)
+    pickupAuraEnabled = state
+end, 300)
+
+addToggle("Hatch Aura", false, function(state)
+    hatchAuraEnabled = state
+end, 330)
+
+addButton("Sell All Now", function()
+    local oldCF = player.Character.HumanoidRootPart.CFrame
+    player.Character.HumanoidRootPart.CFrame = workspace.Tutorial_Points.Tutorial_Point_2.CFrame
+    wait(.2)
+    replicatedStorage.GameEvents.Sell_Inventory:FireServer()
+    wait(.2)
+    player.Character.HumanoidRootPart.CFrame = oldCF
+end, 360)
+
+-- ==== Раздел Shop ====
+addSectionHeader("Shop", 390)
+addToggle("Auto Buy Seeds", false, function(state)
+    autoBuySeedsEnabled = state
+end, 415)
+
+addToggle("Auto Buy Eggs", false, function(state)
+    autoBuyEggsEnabled = state
+end, 445)
+
+addToggle("Auto Buy Gears", false, function(state)
+    autoBuyGearsEnabled = state
+end, 475)
+
+-- ==== Анти-АФК ====
+player.Idled:Connect(function()
+    game:GetService("VirtualUser"):CaptureController()
+    game:GetService("VirtualUser"):ClickButton2(Vector2.new())
+end)
+
+-- === Основные циклы автопокупки ===
+spawn(function()
+    while true do
+        if autoBuySeedsEnabled then
+            for seedName in pairs(selectedSeeds) do
+                replicatedStorage.GameEvents.BuySeedStock:FireServer(seedName)
+            end
+            wait(1)
+        end
+        wait()
+    end
+end)
+
+spawn(function()
+    while true do
+        if autoBuyEggsEnabled then
+            for _, egg in pairs(workspace.Farm.NPCS["Pet Stand"].EggLocations:GetChildren()) do
+                if egg:IsA("Model") and egg:GetAttribute("Stock") and egg:GetAttribute("Stock") > 0 then
+                    replicatedStorage.GameEvents.BuyPetEgg:FireServer(egg.Name)
+                end
+            end
+            wait(1)
+        end
+        wait()
+    end
+end)
+
+spawn(function()
+    while true do
+        if autoBuyGearsEnabled then
+            for _, gear in pairs(workspace.Farm.NPCS["Gear NPC"].GearDisplay:GetChildren()) do
+                if gear:IsA("Model") and gear:FindFirstChild("Stock") and gear.Stock.Value > 0 then
+                    replicatedStorage.GameEvents.BuyGearStock:FireServer(gear.Name)
+                end
+            end
+            wait(1)
+        end
+        wait()
+    end
+end)
+
+-- ==== Auto Plant ====
+spawn(function()
+    while true do
+        if autoPlantEnabled and player.Character and player.Character:FindFirstChildOfClass("Tool") then
+            local tool = player.Character:FindFirstChildOfClass("Tool")
+            if tool:GetAttribute("ItemType") == "Seed" then
+                replicatedStorage.GameEvents.Plant_RE:FireServer(player.Character.HumanoidRootPart.CFrame.Position, tool:GetAttribute("ItemName"))
+                wait(plantDelay)
+            end
+        end
+        wait()
+    end
+end)
+
+-- ==== Pickup Aura ====
+spawn(function()
+    while true do
+        if pickupAuraEnabled then
+            local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, plant in pairs(workspace.Farm.Plants_Physical:GetChildren()) do
+                    if plant:IsA("Model") then
+                        for _, prompt in pairs(plant:GetDescendants()) do
+                            if prompt:IsA("ProximityPrompt") and prompt.Parent.Parent:FindFirstChild("Weight") and prompt.Parent.Parent.Weight.Value > pickupWeight then
+                                fireproximityprompt(prompt)
+                                wait(0.1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        wait()
+    end
+end)
+
+-- ==== Hatch Aura ====
+spawn(function()
+    while true do
+        if hatchAuraEnabled then
+            for _, obj in pairs(workspace.Farm.Objects_Physical:GetChildren()) do
+                if obj:IsA("Model") and obj:GetAttribute("TimeToHatch") == 0 then
+                    for _, prompt in pairs(obj:GetDescendants()) do
+                        if prompt:IsA("ProximityPrompt") then
+                            fireproximityprompt(prompt)
+                            wait(0.1)
+                        end
+                    end
+                end
+            end
+        end
+        wait()
+    end
+end)
+
+print("Twin | Grow a Garden загружен!")
